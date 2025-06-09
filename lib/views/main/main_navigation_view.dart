@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../home/home_view.dart';
 import '../exercises/exercise_list_view.dart';
-import '../conversion/conversion_view.dart';
 import '../favorites/favorites_history_view.dart';
 import '../profile/profile_view.dart';
 
@@ -18,7 +17,6 @@ class MainNavigationViewState extends State<MainNavigationView> {
   final List<Widget> _pages = [
     const HomeView(),
     const ExerciseListView(),
-    const ConversionView(),
     const FavoritesHistoryView(),
     const ProfileView(),
   ];

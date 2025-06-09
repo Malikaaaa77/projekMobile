@@ -1,5 +1,6 @@
 import '../models/user_model.dart';
 import '../services/api_service.dart';
+import '../services/database_service.dart';
 import '../utils/session_manager.dart';
 import 'package:flutter/foundation.dart';
 
@@ -33,16 +34,18 @@ class HomePresenter {
       view.hideLoading();
     }
   }
-
   Future<void> _loadStats(int userId) async {
     try {
-      // Simplified stats - just get basic muscle info
+      // Get target muscles from API
       final targetMuscles = ApiService.getAvailableTargetMuscles();
       
-      // Provide mock stats for now until database methods are fixed
+      // Load actual favorites and history counts from database
+      final favorites = await DatabaseService.instance.getFavoritesByUserId(userId);
+      final history = await DatabaseService.instance.getHistoryByUserId(userId);
+      
       final stats = {
-        'favorites': 0, // Will be updated when correct methods are found
-        'completed': 0, // Will be updated when correct methods are found
+        'favorites': favorites.length,
+        'completed': history.length,
         'total_muscles': targetMuscles.length,
         'active_muscles': 0,
       };
@@ -55,7 +58,7 @@ class HomePresenter {
       view.showStats(stats);
       
       if (kDebugMode) {
-        debugPrint('Basic stats loaded: $stats');
+        debugPrint('Stats loaded - Favorites: ${favorites.length}, Completed: ${history.length}');
       }
     } catch (e) {
       if (kDebugMode) {
@@ -71,7 +74,6 @@ class HomePresenter {
       view.showStats(fallbackStats);
     }
   }
-
   Future<void> refreshData() async {
     await loadUserData();
   }
@@ -79,12 +81,6 @@ class HomePresenter {
   void navigateToExercises() {
     if (kDebugMode) {
       debugPrint('Navigating to exercises');
-    }
-  }
-
-  void navigateToConversion() {
-    if (kDebugMode) {
-      debugPrint('Navigating to conversion');
     }
   }
 

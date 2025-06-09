@@ -58,31 +58,41 @@ class ApiService {
         if (kDebugMode) {
           debugPrint('Fetching exercises: offset=$offset, limit=$limit, page=${currentPage + 1}');
         }
-        
-        final response = await http.get(
+          final response = await http.get(
           Uri.parse('$exerciseBaseUrl/exercises?offset=$offset&limit=$limit'),
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
           },
-        );
+        ).timeout(const Duration(seconds: 30)); // Add timeout
 
         if (kDebugMode) {
           debugPrint('Exercises API Response Status: ${response.statusCode}');
-        }
-
-        if (response.statusCode == 200) {
+        }        if (response.statusCode == 200) {
           Map<String, dynamic> jsonData = json.decode(response.body);
           
           if (jsonData['success'] == true && jsonData['data'] != null) {
-            List<dynamic> exercises = jsonData['data']['exercises'];
+            dynamic exercisesData = jsonData['data']['exercises'];
             
-            if (exercises.isEmpty) {
+            if (exercisesData == null || (exercisesData is List && exercisesData.isEmpty)) {
               hasMore = false;
               break;
             }
             
-            final exerciseList = exercises.map((json) => ExerciseModel.fromJson(json)).toList();
+            List<dynamic> exercises = exercisesData is List ? exercisesData : [exercisesData];
+            
+            final exerciseList = exercises.map((json) {
+              try {
+                return ExerciseModel.fromJson(json);
+              } catch (e) {
+                if (kDebugMode) {
+                  debugPrint('Error parsing exercise: $e');
+                  debugPrint('Exercise data: $json');
+                }
+                return null;
+              }
+            }).where((exercise) => exercise != null).cast<ExerciseModel>().toList();
+            
             allExercises.addAll(exerciseList);
             
             // Check if there's next page

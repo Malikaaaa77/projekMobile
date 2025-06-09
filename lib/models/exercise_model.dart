@@ -18,15 +18,14 @@ class ExerciseModel {
     required this.gifUrl,
     required this.instructions,
   });
-
   factory ExerciseModel.fromJson(Map<String, dynamic> json) {
     return ExerciseModel(
-      id: json['id']?.toString() ?? '', // Add this - convert to string safely
+      id: json['exerciseId']?.toString() ?? json['id']?.toString() ?? '', // Handle both exerciseId and id
       name: json['name'] ?? '',
-      targetMuscles: _parseStringList(json['target']),
+      targetMuscles: _parseStringList(json['targetMuscles'] ?? json['target']),
       secondaryMuscles: _parseStringList(json['secondaryMuscles']),
-      bodyParts: _parseStringList(json['bodyPart']),
-      equipments: _parseStringList(json['equipment']),
+      bodyParts: _parseStringList(json['bodyParts'] ?? json['bodyPart']),
+      equipments: _parseStringList(json['equipments'] ?? json['equipment']),
       gifUrl: json['gifUrl'] ?? '',
       instructions: _parseStringList(json['instructions']),
     );

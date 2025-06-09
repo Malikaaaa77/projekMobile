@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../../models/user_model.dart';
 import '../../presenters/home_presenter.dart';
 import '../exercises/exercise_list_view.dart';
-import '../conversion/conversion_view.dart';
 import '../favorites/favorites_history_view.dart';
 import '../profile/profile_view.dart';
 import '../location/gym_finder_view.dart';
@@ -158,8 +157,7 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    
-                    GridView.count(
+                      GridView.count(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       crossAxisCount: 2,
@@ -172,12 +170,6 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
                           Icons.fitness_center,
                           Colors.blue,
                           () => _navigateToExercises(),
-                        ),
-                        _buildActionCard(
-                          'Converter',
-                          Icons.swap_horiz,
-                          Colors.orange,
-                          () => _navigateToConversion(),
                         ),
                          _buildActionCard(
                           'Gym Finder',
@@ -276,15 +268,6 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
       MaterialPageRoute(builder: (context) => const ExerciseListView()),
     );
   }
-
-  void _navigateToConversion() {
-    _presenter.navigateToConversion();
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const ConversionView()),
-    );
-  }
-
   void _navigateToFavorites() {
     _presenter.navigateToFavorites();
     Navigator.push(

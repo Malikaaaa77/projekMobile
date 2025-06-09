@@ -1,25 +1,34 @@
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
+import 'package:sensors_plus/sensors_plus.dart';
+import 'dart:async';
+import 'dart:math';
 import '../../models/exercise_model.dart';
 import '../../presenters/exercise_presenter.dart';
 import '../../widgets/equipment_price_widget.dart';
 import '../../utils/session_manager.dart';
+import '../../services/notification_service.dart';
+import '../../services/database_service.dart';
+import '../../models/history_model.dart';
+import '../../models/favorite_model.dart';
+
 
 class ExerciseListView extends StatefulWidget {
   final String? muscle;
+  final Function(bool)? onVisibilityChanged; // Add callback for visibility changes
 
   const ExerciseListView({
     super.key, // Fix: Use super.key
     this.muscle,
+    this.onVisibilityChanged, // Optional callback
   });
   
-
   @override
-  State<ExerciseListView> createState() => _ExerciseListViewState();
+  State<ExerciseListView> createState() => ExerciseListViewState();
 }
 
-class _ExerciseListViewState extends State<ExerciseListView>
+class ExerciseListViewState extends State<ExerciseListView>
+    with WidgetsBindingObserver
     implements ExerciseViewContract {
   late ExercisePresenter _presenter;
   
@@ -35,18 +44,28 @@ class _ExerciseListViewState extends State<ExerciseListView>
   
   // Favorites
   Set<String> _favoriteExerciseIds = {};
-  
-  // UI state
+    // UI state
   final ScrollController _scrollController = ScrollController();
-
+  
+  // Shake detection
+  StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
+  DateTime? _lastShakeTime;  
+  static const double _shakeThreshold = 12.0;
+  static const int _shakeCooldown = 2000; // milliseconds
+  bool _isPageActive = true; // Track if page is active
+  
   @override
   void initState() {
     super.initState();
     _presenter = ExercisePresenter(this);
     _selectedMuscle = widget.muscle;
     
+    // Add observer for app lifecycle
+    WidgetsBinding.instance.addObserver(this);
+    
     _initializeData();
     _loadFavorites();
+    _initializeShakeDetection();
     
     // Search listener
     _searchController.addListener(() {
@@ -56,10 +75,33 @@ class _ExerciseListViewState extends State<ExerciseListView>
     });
   }
 
+  // Method to handle page visibility changes from parent navigation
+  void setPageVisibility(bool isVisible) {
+    if (_isPageActive != isVisible) {
+      _isPageActive = isVisible;
+      
+      if (kDebugMode) {
+        debugPrint('ExerciseListView: Page visibility changed to $isVisible');
+      }
+      
+      // Update shake detection based on visibility
+      if (isVisible) {
+        _startShakeDetection();
+      } else {
+        _stopShakeDetection();
+      }
+      
+      // Notify parent if callback provided
+      widget.onVisibilityChanged?.call(isVisible);
+    }
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
     _scrollController.dispose();
+    _accelerometerSubscription?.cancel(); // Cancel shake detection
+    WidgetsBinding.instance.removeObserver(this); // Remove observer
     super.dispose();
   }
 
@@ -72,15 +114,18 @@ class _ExerciseListViewState extends State<ExerciseListView>
       await _presenter.loadAllExercises();
     }
   }
-
   Future<void> _loadFavorites() async {
     try {
       final user = await SessionManager.getCurrentUser();
       if (user != null) {
-        // Simple approach - just initialize empty for now
+        final favorites = await DatabaseService.instance.getFavoritesByUserId(user.id!);
         setState(() {
-          _favoriteExerciseIds = {};
+          _favoriteExerciseIds = favorites.map((fav) => fav.exerciseName).toSet();
         });
+        
+        if (kDebugMode) {
+          debugPrint('Loaded ${favorites.length} favorites for user ${user.id}');
+        }
       }
     } catch (e) {
       if (kDebugMode) {
@@ -240,9 +285,9 @@ class _ExerciseListViewState extends State<ExerciseListView>
         label: Text(
           muscle == 'All' ? muscle : muscle.toUpperCase(),
           style: TextStyle(
-            color: isSelected ? Colors.blue[600] : Colors.white,
+            color: isSelected ? Colors.white : Colors.blue[700], // Dark blue for unselected, white for selected
             fontWeight: FontWeight.w600,
-            fontSize: 11,
+            fontSize: 12,
           ),
         ),
         selected: isSelected,
@@ -253,13 +298,15 @@ class _ExerciseListViewState extends State<ExerciseListView>
             _handleMuscleSelection(muscle);
           }
         },
-        backgroundColor: Colors.transparent,
-        selectedColor: Colors.white,
+        backgroundColor: Colors.white, // Solid white background for unselected
+        selectedColor: Colors.blue[700], // Dark blue background for selected
         side: BorderSide(
-          color: isSelected ? Colors.white : Colors.white70,
-          width: 1,
+          color: isSelected ? Colors.blue[700]! : Colors.blue[300]!,
+          width: 1.5,
         ),
-        checkmarkColor: Colors.blue[600],
+        checkmarkColor: Colors.white,
+        elevation: 3, // Increased elevation for better visibility
+        shadowColor: Colors.black38,
       ),
     );
   }
@@ -460,66 +507,63 @@ class _ExerciseListViewState extends State<ExerciseListView>
       ),
     );
   }
-
+  
   Widget _buildExerciseCard(ExerciseModel exercise, int index) {
-  final isFavorite = _favoriteExerciseIds.contains(exercise.name);
-  
-  // DEBUG: Print muscle yang akan dikirim ke widget
-  print('==== DEBUG [ExerciseCard]: Exercise "${exercise.name}" target muscles: ${exercise.targetMuscles}');
-  
-  return Card(
-    elevation: 4,
-    margin: const EdgeInsets.only(bottom: 16),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Exercise Image with Hero Animation
-        Hero(
-          tag: 'exercise_${exercise.id}_$index',
-          child: ClipRRect(
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+    final isFavorite = _favoriteExerciseIds.contains(exercise.name);
+    
+    // Replace print with debugPrint for better logging
+    if (kDebugMode) {
+      debugPrint('==== DEBUG [ExerciseCard]: Exercise "${exercise.name}" target muscles: ${exercise.targetMuscles}');
+    }
+    
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Exercise Header with Icon (No Image/GIF)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.blue[600]!,
+                  Colors.blue[500]!,
+                ],
+              ),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            ),
             child: Stack(
               children: [
-                CachedNetworkImage(
-                  imageUrl: exercise.gifUrl,
-                  height: 200,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  placeholder: (context, url) => Container(
-                    height: 200,
-                    color: Colors.grey[200],
-                    child: const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircularProgressIndicator(),
-                          SizedBox(height: 8),
-                          Text('Loading exercise...', style: TextStyle(fontSize: 12)),
-                        ],
+                Center(
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.fitness_center,
+                        size: 48,
+                        color: Colors.white,
                       ),
-                    ),
-                  ),
-                  errorWidget: (context, url, error) => Container(
-                    height: 200,
-                    color: Colors.grey[300],
-                    child: const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.error, size: 50, color: Colors.grey),
-                          SizedBox(height: 8),
-                          Text('Failed to load image', style: TextStyle(fontSize: 12)),
-                        ],
+                      const SizedBox(height: 8),
+                      Text(
+                        exercise.name,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                        textAlign: TextAlign.center,
                       ),
-                    ),
+                    ],
                   ),
                 ),
                 
                 // Favorite Button Overlay
                 Positioned(
-                  top: 8,
-                  right: 8,
+                  top: 0,
+                  right: 0,
                   child: Material(
                     color: Colors.transparent,
                     child: InkWell(
@@ -528,7 +572,7 @@ class _ExerciseListViewState extends State<ExerciseListView>
                       child: Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.5),
+                          color: Colors.black.withValues(alpha: 0.3),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Icon(
@@ -543,219 +587,207 @@ class _ExerciseListViewState extends State<ExerciseListView>
               ],
             ),
           ),
-        ),
-        
-        // Exercise Details
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Exercise Name
-              Text(
-                exercise.name,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              
-              const SizedBox(height: 12),
-              
-              // Target Muscles
-              if (exercise.targetMuscles.isNotEmpty) ...[
-                const Text(
-                  'Target Muscles:',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: exercise.targetMuscles.map((muscle) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.blue[100],
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        muscle.toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.blue[700],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 8),
-              ],
-              
-              // **EQUIPMENT PRICE COMPARISON WIDGET - ALWAYS RENDERED**
-              EquipmentPriceWidget(
-                muscle: exercise.targetMuscles.isNotEmpty
-                    ? exercise.targetMuscles.first.toLowerCase()
-                    : 'biceps', // fallback to ensure widget always has data
-              ),
-              
-              // Secondary Muscles
-              if (exercise.secondaryMuscles.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                const Text(
-                  'Secondary Muscles:',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: exercise.secondaryMuscles.map((muscle) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[200],
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        muscle.toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.grey[700],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-              
-              // Instructions
-              if (exercise.instructions.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                ExpansionTile(
-                  title: const Text(
-                    'Instructions',
+          
+          // Exercise Details
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Target Muscles
+                if (exercise.targetMuscles.isNotEmpty) ...[
+                  const Text(
+                    'Target Muscles:',
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 12,
                       fontWeight: FontWeight.w600,
+                      color: Colors.grey,
                     ),
                   ),
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[50],
-                        borderRadius: BorderRadius.circular(8),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: exercise.targetMuscles.map((muscle) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.blue[100],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          muscle.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.blue[700],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                
+                // **EQUIPMENT PRICE COMPARISON WIDGET - ALWAYS RENDERED**
+                EquipmentPriceWidget(
+                  muscle: exercise.targetMuscles.isNotEmpty
+                      ? exercise.targetMuscles.first.toLowerCase()
+                      : 'biceps', // fallback to ensure widget always has data
+                ),
+                
+                // Secondary Muscles
+                if (exercise.secondaryMuscles.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Secondary Muscles:',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: exercise.secondaryMuscles.map((muscle) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          muscle.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+                
+                // Instructions
+                if (exercise.instructions.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  ExpansionTile(
+                    title: const Text(
+                      'Instructions',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: exercise.instructions.asMap().entries.map((entry) {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  width: 20,
-                                  height: 20,
-                                  margin: const EdgeInsets.only(right: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.blue[600],
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      '${entry.key + 1}',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
+                    ),
+                    children: [
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.symmetric(horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[50],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: exercise.instructions.asMap().entries.map((entry) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 20,
+                                    height: 20,
+                                    margin: const EdgeInsets.only(right: 8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue[600],
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        '${entry.key + 1}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    entry.value,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      height: 1.4,
+                                  Expanded(
+                                    child: Text(
+                                      entry.value,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        height: 1.4,
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                  ),
+                ],
+                
+                // Action Buttons
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _markAsCompleted(exercise),
+                        icon: const Icon(Icons.check_circle_outline, size: 18),
+                        label: const Text('Mark Complete'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green[600],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _toggleFavorite(exercise),
+                        icon: Icon(
+                          isFavorite ? Icons.favorite : Icons.favorite_border,
+                          size: 18,
+                          color: isFavorite ? Colors.red : null,
+                        ),
+                        label: Text(isFavorite ? 'Favorited' : 'Add Favorite'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          side: BorderSide(
+                            color: isFavorite ? Colors.red : Colors.grey,
+                          ),
+                          foregroundColor: isFavorite ? Colors.red : null,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ],
-              
-              // Action Buttons
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _markAsCompleted(exercise),
-                      icon: const Icon(Icons.check_circle_outline, size: 18),
-                      label: const Text('Mark Complete'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green[600],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _toggleFavorite(exercise),
-                      icon: Icon(
-                        isFavorite ? Icons.favorite : Icons.favorite_border,
-                        size: 18,
-                        color: isFavorite ? Colors.red : null,
-                      ),
-                      label: Text(isFavorite ? 'Favorited' : 'Add Favorite'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        side: BorderSide(
-                          color: isFavorite ? Colors.red : Colors.grey,
-                        ),
-                        foregroundColor: isFavorite ? Colors.red : null,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+            ),
           ),
-        ),
-      ],
-    ),
-  );
-}
+        ],
+      ),
+    );
+  }
 
   Widget? _buildScrollToTopFab() {
     return FloatingActionButton(
@@ -791,23 +823,49 @@ class _ExerciseListViewState extends State<ExerciseListView>
     await _initializeData();
     await _loadFavorites();
   }
-
   // Simplified database operations for now
   Future<void> _toggleFavorite(ExerciseModel exercise) async {
     try {
+      final user = await SessionManager.getCurrentUser();
+      if (user == null) {
+        _showMessage('Please login to manage favorites');
+        return;
+      }
+
       final isFavorite = _favoriteExerciseIds.contains(exercise.name);
       
       if (isFavorite) {
+        // Remove from favorites
+        await DatabaseService.instance.removeFavorite(user.id!, exercise.name);
         setState(() {
           _favoriteExerciseIds.remove(exercise.name);
         });
         _showMessage('Removed from favorites');
       } else {
+        // Add to favorites
+        final favoriteModel = FavoriteModel(
+          userId: user.id!,
+          exerciseName: exercise.name,
+          exerciseType: exercise.targetMuscles.join(', '),
+          muscle: exercise.targetMuscles.isNotEmpty ? exercise.targetMuscles.first : 'Unknown',
+          equipment: exercise.equipments.isNotEmpty ? exercise.equipments.first : 'None',
+          difficulty: 'Intermediate', // Default difficulty
+          instructions: exercise.instructions.join(' '),
+          addedAt: DateTime.now(),
+        );
+        
+        await DatabaseService.instance.addFavorite(favoriteModel);
         setState(() {
           _favoriteExerciseIds.add(exercise.name);
         });
-        _showMessage('Added to favorites');
+        
+        // Show favorite notification
+        await NotificationService.instance.showFavoriteAdded(exercise.name);
+        _showMessage('Added to favorites ❤️');
       }
+      
+      // Reload favorites
+      await _loadFavorites();
     } catch (e) {
       _showMessage('Error updating favorites');
       if (kDebugMode) {
@@ -815,10 +873,41 @@ class _ExerciseListViewState extends State<ExerciseListView>
       }
     }
   }
-
   Future<void> _markAsCompleted(ExerciseModel exercise) async {
     try {
-      _showMessage('Exercise marked as completed!');
+      final user = await SessionManager.getCurrentUser();
+      if (user == null) {
+        _showMessage('Please login to mark exercises as completed');
+        return;
+      }
+
+      // Create history record
+      final historyModel = HistoryModel(
+        userId: user.id!,
+        exerciseName: exercise.name,
+        exerciseType: exercise.targetMuscles.join(', '),
+        muscle: exercise.targetMuscles.isNotEmpty ? exercise.targetMuscles.first : 'Unknown',
+        equipment: exercise.equipments.isNotEmpty ? exercise.equipments.first : 'None',
+        difficulty: 'Intermediate', // Default difficulty
+        instructions: exercise.instructions.join(' '),
+        completedAt: DateTime.now(),
+      );
+
+      // Save to database
+      await DatabaseService.instance.addHistory(historyModel);
+
+      // Show completion notification
+      await NotificationService.instance.showExerciseCompleted(exercise.name);
+
+      // Get total exercise count for milestone notifications
+      final allHistory = await DatabaseService.instance.getHistoryByUserId(user.id!);
+      await NotificationService.instance.showMilestoneNotification(allHistory.length);
+
+      _showMessage('Exercise marked as completed! 🎉');
+
+      if (kDebugMode) {
+        debugPrint('Exercise completed: ${exercise.name}');
+      }
     } catch (e) {
       _showMessage('Error marking exercise as completed');
       if (kDebugMode) {
@@ -826,7 +915,7 @@ class _ExerciseListViewState extends State<ExerciseListView>
       }
     }
   }
-
+  
   void _showMessage(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -838,7 +927,118 @@ class _ExerciseListViewState extends State<ExerciseListView>
     }
   }
 
-  // ExerciseViewContract Implementation
+  // App lifecycle observer methods
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        // App comes to foreground - start shake detection if this page is active
+        if (_isPageActive) {
+          _startShakeDetection();
+        }
+        break;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+        // App goes to background - stop shake detection
+        _stopShakeDetection();
+        break;
+      case AppLifecycleState.hidden:
+        _stopShakeDetection();
+        break;
+    }
+  }
+
+  // Shake detection methods
+  void _startShakeDetection() {
+    // Only start if not already active and page is active
+    if (_accelerometerSubscription == null && _isPageActive) {
+      _initializeShakeDetection();
+      if (kDebugMode) {
+        debugPrint('Shake detection started for exercises page');
+      }
+    }
+  }
+
+  void _stopShakeDetection() {
+    _accelerometerSubscription?.cancel();
+    _accelerometerSubscription = null;
+    if (kDebugMode) {
+      debugPrint('Shake detection stopped');
+    }
+  }
+
+  void _initializeShakeDetection() {
+    try {
+      _accelerometerSubscription = accelerometerEventStream().listen(
+        (AccelerometerEvent event) {
+          // Only detect shake if page is still active
+          if (_isPageActive) {
+            _detectShake(event);
+          }
+        },
+        onError: (error) {
+          if (kDebugMode) {
+            debugPrint('Accelerometer error: $error');
+          }
+        },
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('Failed to initialize shake detection: $e');
+      }
+    }
+  }
+
+  void _detectShake(AccelerometerEvent event) {
+    final now = DateTime.now();
+    
+    // Check cooldown period
+    if (_lastShakeTime != null && 
+        now.difference(_lastShakeTime!).inMilliseconds < _shakeCooldown) {
+      return;
+    }
+
+    // Calculate acceleration magnitude
+    final acceleration = sqrt(
+      event.x * event.x + 
+      event.y * event.y + 
+      event.z * event.z
+    );
+
+    // Detect shake if acceleration exceeds threshold
+    if (acceleration > _shakeThreshold) {
+      _lastShakeTime = now;
+      _onShakeDetected();
+    }
+  }
+
+  void _onShakeDetected() async {
+    if (kDebugMode) {
+      debugPrint('Shake detected! Refreshing exercises...');
+    }
+    
+    // Show feedback to user
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.vibration, color: Colors.white),
+              SizedBox(width: 8),
+              Text('Shake detected! Refreshing exercises...'),
+            ],
+          ),
+          backgroundColor: Colors.blue,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+    
+    // Trigger refresh
+    await _handleRefresh();
+  }
+  
   @override
   void showExercises(List<ExerciseModel> exercises) {
     if (mounted) {
