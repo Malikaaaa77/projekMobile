@@ -5,7 +5,8 @@ import '../exercises/exercise_list_view.dart';
 import '../conversion/conversion_view.dart';
 import '../favorites/favorites_history_view.dart';
 import '../profile/profile_view.dart';
-import '../location/gym_finder_view.dart'; // Add this import
+import '../location/gym_finder_view.dart';
+import 'quick_time_widget.dart'; // ADD THIS IMPORT (same folder)
 
 class HomeView extends StatefulWidget {
   const HomeView({super.key});
@@ -24,7 +25,10 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
   void initState() {
     super.initState();
     _presenter = HomePresenter(this);
-    _presenter.loadUserData(); // Fixed method name
+    _presenter.loadUserData();
+    
+    // MVP Pattern: Log view initialization
+    print('[MVP] HomeView initialized at UTC: ${DateTime.now().toUtc()}');
   }
 
   @override
@@ -38,7 +42,10 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () => _presenter.refreshData(),
+            onPressed: () {
+              _presenter.refreshData();
+              print('[MVP] HomeView: User refreshed data');
+            },
             tooltip: 'Refresh',
           ),
         ],
@@ -93,7 +100,7 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
                                         ),
                                       ),
                                       Text(
-                                        _user!.fullName, // Fixed: use fullName instead of name
+                                        _user!.fullName, // Shows: Malikaaaa77
                                         style: const TextStyle(
                                           color: Colors.white,
                                           fontSize: 20,
@@ -109,6 +116,11 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
                         ),
                       ),
                     ),
+                    
+                    const SizedBox(height: 16),
+                    
+                    // **QUICK TIME WIDGET - MVP INTEGRATION**
+                    const QuickTimeWidget(),
                     
                     const SizedBox(height: 24),
                     
@@ -159,16 +171,16 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
                           'Exercises',
                           Icons.fitness_center,
                           Colors.blue,
-                          () => _navigateToExercises(), // Fixed: handle navigation in view
+                          () => _navigateToExercises(),
                         ),
                         _buildActionCard(
                           'Converter',
                           Icons.swap_horiz,
                           Colors.orange,
-                          () => _navigateToConversion(), // Fixed: handle navigation in view
+                          () => _navigateToConversion(),
                         ),
                          _buildActionCard(
-                          'Gym Finder',  // Add this
+                          'Gym Finder',
                           Icons.location_on,
                           Colors.green,
                           () => _navigateToGymFinder(),
@@ -177,13 +189,13 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
                           'Favorites',
                           Icons.favorite,
                           Colors.red,
-                          () => _navigateToFavorites(), // Fixed: handle navigation in view
+                          () => _navigateToFavorites(),
                         ),
                         _buildActionCard(
                           'Profile',
                           Icons.person,
                           Colors.purple,
-                          () => _navigateToProfile(), // Fixed: handle navigation in view
+                          () => _navigateToProfile(),
                         ),
                       ],
                     ),
@@ -194,6 +206,8 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
     );
   }
 
+  // ... KEEP ALL YOUR EXISTING METHODS UNCHANGED ...
+  
   Widget _buildStatCard(String title, String value, IconData icon, Color color) {
     return Card(
       elevation: 4,
@@ -254,9 +268,9 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
     );
   }
 
-  // Navigation methods handled by view
+  // Navigation methods - KEEP ALL EXISTING
   void _navigateToExercises() {
-    _presenter.navigateToExercises(); // Log the action
+    _presenter.navigateToExercises();
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const ExerciseListView()),
@@ -264,7 +278,7 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
   }
 
   void _navigateToConversion() {
-    _presenter.navigateToConversion(); // Log the action
+    _presenter.navigateToConversion();
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const ConversionView()),
@@ -272,7 +286,7 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
   }
 
   void _navigateToFavorites() {
-    _presenter.navigateToFavorites(); // Log the action
+    _presenter.navigateToFavorites();
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const FavoritesHistoryView()),
@@ -280,20 +294,21 @@ class HomeViewState extends State<HomeView> implements HomeViewContract {
   }
 
   void _navigateToProfile() {
-    _presenter.navigateToProfile(); // Log the action
+    _presenter.navigateToProfile();
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const ProfileView()),
     );
   }
 
-      void _navigateToGymFinder() {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (context) => const GymFinderView()),
-      );
-    }
+  void _navigateToGymFinder() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const GymFinderView()),
+    );
+  }
 
+  // Interface methods - KEEP ALL EXISTING
   @override
   void showUserData(UserModel user) {
     if (mounted) {

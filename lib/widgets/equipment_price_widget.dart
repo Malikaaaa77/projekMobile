@@ -20,6 +20,7 @@ class _EquipmentPriceWidgetState extends State<EquipmentPriceWidget> {
   List<CurrencyRate> _currencies = [];
   bool _isLoading = true;
   bool _isExpanded = false;
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -28,28 +29,39 @@ class _EquipmentPriceWidgetState extends State<EquipmentPriceWidget> {
   }
 
   Future<void> _loadEquipmentData() async {
-     print('DEBUG EquipmentPriceWidget muscle: ${widget.muscle}');
-      setState(() => _isLoading = true);
-      try {
-    
+    print('==== DEBUG [EquipmentPriceWidget]: muscle = ${widget.muscle}');
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
       final equipment = await EquipmentService.getEquipmentForMuscle(widget.muscle);
-      print('DEBUG Loaded equipment: $equipment');
       final currencies = await EquipmentService.getCurrencyRates();
-      setState(() {
-        _equipment = equipment;
-        _currencies = currencies;
-        _isLoading = false;
-      });
+      
+      print('==== DEBUG [EquipmentPriceWidget]: loaded equipment count = ${equipment.length}');
+      print('==== DEBUG [EquipmentPriceWidget]: loaded currencies count = ${currencies.length}');
+      
+      if (mounted) {
+        setState(() {
+          _equipment = equipment;
+          _currencies = currencies;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() => _isLoading = false);
+      print('==== DEBUG [EquipmentPriceWidget]: error = $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = e.toString();
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_equipment.isEmpty && !_isLoading) {
-      return const SizedBox.shrink();
-    }
     return Container(
       margin: const EdgeInsets.only(top: 16),
       decoration: BoxDecoration(
@@ -60,6 +72,7 @@ class _EquipmentPriceWidgetState extends State<EquipmentPriceWidget> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Header - Always visible
           InkWell(
             onTap: () => setState(() => _isExpanded = !_isExpanded),
             child: Padding(
@@ -103,12 +116,70 @@ class _EquipmentPriceWidgetState extends State<EquipmentPriceWidget> {
               ),
             ),
           ),
+          
+          // Expanded Content
           if (_isExpanded) ...[
             const Divider(height: 1),
             if (_isLoading)
               const Padding(
                 padding: EdgeInsets.all(16),
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(
+                  child: Column(
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 8),
+                      Text('Loading equipment recommendations...'),
+                    ],
+                  ),
+                ),
+              )
+            else if (_errorMessage != null)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline, color: Colors.red[700]),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Failed to load equipment data\nMuscle: ${widget.muscle}',
+                          style: TextStyle(color: Colors.red[700], fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else if (_equipment.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.orange[700]),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'No specific equipment found for "${widget.muscle}"\nTry bodyweight exercises or general equipment',
+                          style: TextStyle(color: Colors.orange[700], fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               )
             else
               ...(_equipment.map((equipment) => _buildEquipmentCard(equipment))),
@@ -232,7 +303,7 @@ class _EquipmentPriceWidgetState extends State<EquipmentPriceWidget> {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: Colors.green, // Gunakan warna solid
+                color: Colors.green[700],
               ),
             ),
             const SizedBox(height: 4),
@@ -265,9 +336,9 @@ class _EquipmentPriceWidgetState extends State<EquipmentPriceWidget> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withAlpha(30), // Ganti .withOpacity(0.1) -> .withAlpha(30)
+        color: color.withAlpha(30),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withAlpha(80)), // Ganti .withOpacity(0.3) -> .withAlpha(80)
+        border: Border.all(color: color.withAlpha(80)),
       ),
       child: Text(
         necessity.toUpperCase(),
@@ -280,3 +351,4 @@ class _EquipmentPriceWidgetState extends State<EquipmentPriceWidget> {
     );
   }
 }
+
