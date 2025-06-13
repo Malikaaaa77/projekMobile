@@ -1,9 +1,9 @@
-import 'package:crypto/crypto.dart';
-import 'dart:convert';
+
 import '../views/login/login_view.dart';
 import '../services/database_service.dart';
 import '../utils/session_manager.dart';
 import 'package:flutter/foundation.dart';
+import '../utils/password_utils.dart';
 
 class LoginPresenter {
   final LoginViewContract view;
@@ -21,9 +21,6 @@ class LoginPresenter {
         return;
       }
 
-      // Hash password
-      final hashedPassword = sha256.convert(utf8.encode(password)).toString();
-
       // Check user by email
       final user = await DatabaseService.instance.getUserByEmail(email.trim());
 
@@ -34,7 +31,7 @@ class LoginPresenter {
       }
 
       // Verify password
-      if (user.password != hashedPassword) {
+      if (!PasswordUtils.verifyPassword(password, user.password)) {
         view.showError('Invalid password');
         view.hideLoading();
         return;

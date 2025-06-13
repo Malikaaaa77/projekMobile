@@ -1,9 +1,9 @@
-import 'package:crypto/crypto.dart';
-import 'dart:convert';
+
 import '../views/login/register_view.dart';
 import '../services/database_service.dart';
 import '../models/user_model.dart';
 import 'package:flutter/foundation.dart';
+import '../utils/password_utils.dart';
 
 class RegisterPresenter {
   final RegisterViewContract view;
@@ -42,7 +42,7 @@ class RegisterPresenter {
       }
 
       // Hash password
-      final hashedPassword = sha256.convert(utf8.encode(password)).toString();
+      String hashedPassword = PasswordUtils.hashPassword(password);
 
       // Create username from email (part before @)
       final username = email.split('@')[0].toLowerCase();

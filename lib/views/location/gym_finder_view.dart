@@ -33,7 +33,7 @@ class GymFinderViewState extends State<GymFinderView> {
       'isOpen': true,
     },
     {
-      'name': 'Gold\'s Gym',
+      'name': 'Golds Gym',
       'distance': '1.8 km',
       'rating': 4.7,
       'address': 'Jl. Gatot Subroto No. 789',
